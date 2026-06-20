@@ -1,0 +1,140 @@
+data:
+  raw_path: "data/raw/HEMS_dataset.csv"
+  processed_dir: "data/processed"
+  timestamp_col: "timestamp"
+  house_id_col: "house_id"
+  date_format: "%d-%m-%Y %H:%M"
+  freq_minutes: 15
+
+targets:
+  load_15: "target_load_kW_15"
+  pv_15: "target_pv_kW_15"
+  load_1d: "target_load_kW_1D"
+  pv_1d: "target_pv_kW_1D"
+
+features:
+  temporal:
+    - day_of_week
+    - hour_of_day
+    - minute_of_hour
+    - is_weekend
+  weather:
+    - outdoor_temp_C
+    - solar_irradiance_Wm2
+    - humidity_pct
+  load_breakdown:
+    - base_load_kW
+    - hvac_power_kW
+  appliances:
+    - washing_machine_on
+    - dishwasher_on
+    - water_heater_on
+    - ev_charging_on
+    - ev_charging_power_kW
+  pv:
+    - pv_capacity_kW
+    - pv_generation_kW
+  battery:
+    - battery_capacity_kWh
+    - battery_soc_kWh
+    - battery_charge_power_kW
+    - battery_discharge_power_kW
+  grid:
+    - net_grid_power_kW
+    - tou_price_per_kWh
+    - feed_in_tariff_per_kWh
+    - grid_co2_intensity_g_per_kWh
+    - grid_import_kW
+    - grid_export_kW
+  cost:
+    - instantaneous_cost_INR
+    - instantaneous_revenue_INR
+  total_demand:
+    - total_demand_kW
+
+feature_engineering:
+  cyclical_encode:
+    - hour_of_day
+    - day_of_week
+    - minute_of_hour
+  lag_features:
+    enabled: true
+    # columns to create lags for
+    columns:
+      - total_demand_kW
+      - pv_generation_kW
+      - outdoor_temp_C
+      - solar_irradiance_Wm2
+      - battery_soc_kWh
+    # lags in steps (1 step = 15 min)
+    lags_15min: [1, 2, 4, 8, 12, 24]       # 15min, 30min, 1h, 2h, 3h, 6h
+    lags_1d: [96]                            # 24h
+  rolling_features:
+    enabled: true
+    windows_15min: [4, 8, 24, 96]           # 1h, 2h, 6h, 24h
+    windows_1d: [96, 336]                    # 24h, 3.5d
+    columns:
+      - total_demand_kW
+      - pv_generation_kW
+      - outdoor_temp_C
+  appliance_features:
+    enabled: true
+    # time since last event windows (in steps)
+    time_since_window: 96
+
+model:
+  architecture: "multi_task"  # multi_task, single_task, lightgbm
+  sequence_length: 96         # 24 hours of history (96 * 15min)
+  forecast_15_steps: 1        # 15-min ahead
+  forecast_1d_steps: 96       # 24h ahead
+
+  shared_encoder:
+    type: "lstm"              # lstm, transformer, cnn
+    units: 128
+    layers: 2
+    dropout: 0.2
+
+  head_15min:
+    units: [64, 32]
+    dropout: 0.2
+
+  head_1d:
+    units: [64, 32]
+    dropout: 0.2
+
+  lightgbm:
+    num_leaves: 63
+    learning_rate: 0.05
+    n_estimators: 500
+    early_stopping_rounds: 50
+
+training:
+  batch_size: 256
+  epochs: 100
+  learning_rate: 0.001
+  optimizer: "adam"
+  early_stopping_patience: 10
+  reduce_lr_patience: 5
+  reduce_lr_factor: 0.5
+  model_save_path: "models/hems_model.h5"
+  lgbm_save_path: "models/hems_lgbm.txt"
+
+  split:
+    train_start: null
+    train_end: "31-03-2025 23:45"
+    val_start: "01-04-2025 00:00"
+    val_end: "30-04-2025 23:45"
+    test_start: "01-05-2025 00:00"
+    test_end: null
+
+evaluation:
+  metrics:
+    - mae
+    - rmse
+    - mape
+    - r2
+  plot_predictions: true
+
+api:
+  host: "0.0.0.0"
+  port: 8000
